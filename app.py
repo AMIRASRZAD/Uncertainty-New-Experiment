@@ -15,15 +15,19 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'new_secret_5678')
 
-# Neon connection pool
-db_pool = psycopg2.pool.SimpleConnectionPool(
-    1, 20,
+# Neon threaded connection pool
+db_pool = psycopg2.pool.ThreadedConnectionPool(
+    1, 10,  # Reduced max connections to avoid Neon limits
     host=os.environ.get('DB_HOST', 'ep-odd-boat-a5tpi1i2-pooler.us-east-2.aws.neon.tech'),
-    port=os.environ.get('DB_PORT', 5432),
+    port=os.environ.get('DB_PORT', '5432'),
     database=os.environ.get('DB_NAME', 'neondb'),
     user=os.environ.get('DB_USER', 'neondb_owner'),
     password=os.environ.get('DB_PASSWORD', 'npg_zR21CxagGdVB'),
-    sslmode='require'
+    sslmode='require',
+    keepalives=1,
+    keepalives_idle=30,
+    keepalives_interval=10,
+    keepalives_count=5
 )
 
 # Load dataset
@@ -89,8 +93,12 @@ def task():
         else:
             # Save responses to database with retry logic
             for attempt in range(3):  # Retry up to 3 times
-                conn = db_pool.getconn()
+                conn = None
                 try:
+                    conn = db_pool.getconn()
+                    # Validate connection
+                    with conn.cursor() as cursor:
+                        cursor.execute("SELECT 1")
                     with conn.cursor() as cursor:
                         for response in session['responses']:
                             task_data = next(t for t in session['tasks'] if t['ID'] == response['ID'])
@@ -108,19 +116,27 @@ def task():
                         break  # Exit retry loop on success
                 except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
                     logger.error(f"Database error on attempt {attempt + 1}: {e}")
-                    conn.rollback()
-                    db_pool.putconn(conn, close=True)  # Close the faulty connection
+                    if conn:
+                        try:
+                            conn.rollback()
+                        except:
+                            pass  # Ignore rollback errors
+                        db_pool.putconn(conn, close=True)  # Close faulty connection
                     if attempt == 2:  # Last attempt failed
                         logger.error("Failed to save responses after 3 attempts")
                         return "Database connection error. Please try again later.", 500
-                    time.sleep(1)  # Wait before retrying
+                    time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
                 except Exception as e:
                     logger.error(f"Unexpected error saving data: {e}")
-                    conn.rollback()
-                    db_pool.putconn(conn)
+                    if conn:
+                        try:
+                            conn.rollback()
+                        except:
+                            pass
+                        db_pool.putconn(conn)
                     return f"Error saving data: {e}", 500
                 finally:
-                    if conn not in [None, False]:  # Ensure conn is valid before returning
+                    if conn and conn not in [None, False]:
                         db_pool.putconn(conn)
             return render_template('end.html')
 
@@ -243,8 +259,9 @@ def step4():
 
 @app.route('/test-db')
 def test_db():
-    conn = db_pool.getconn()
+    conn = None
     try:
+        conn = db_pool.getconn()
         with conn.cursor() as cursor:
             cursor.execute("SELECT NOW();")
             result = cursor.fetchone()
@@ -254,8 +271,10 @@ def test_db():
         logger.error(f"Database connection test failed: {e}")
         return f"Connection failed: {e}"
     finally:
-        if conn not in [None, False]:
+        if conn and conn not in [None, False]:
             db_pool.putconn(conn)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
+    port = int(os.environ.get('PORT', 10000))
+    logger.info(f"Starting Flask app on port {port}")
+    app.run(host='0.0.0.0', port=port)
