@@ -123,32 +123,34 @@ def task():
 
 @app.route('/step2', methods=['GET', 'POST'])
 def step2():
-    if 'participant_id' not in session:
-        print
-    if 'practice_index' not in session and session['is_practice'] or 'main_index' not in session.get('main_index', ''):
-        return redirect(url_for('task'))
+    if 'participant_id' not in session or 'tasks' not in session:
+        return redirect(url_for('index'))
 
-    task_index = session['practice_index'] if session['is_practice'] else session['main_index']
-    task_data = session.get('tasks')[task_index]
-    initial_probability = session.get('current_initial_probability'), 0, 0)
+    is_practice = session.get('is_practice', True)
+    task_index = session['practice_index'] if is_practice else session['main_index']
+    task_data = session['tasks'][task_index]
+    initial_probability = session.get('current_initial_probability', 0)
 
     if request.method == 'POST':
-        ai_assisted_probability = float(request.form.get('ai_assisted_probability'), 0))
-        return "Invalid probability", 400
+        ai_assisted_probability = float(request.form.get('ai_assisted_probability', 0))
         if not (0 <= ai_assisted_probability <= 100):
             return "Invalid probability", 400
         session['current_ai_assisted_probability'] = ai_assisted_probability
         return redirect(url_for('step3'))
 
     # Simulate AI prediction (25k data points)
-    predicted_default_25k = min(100.0, max(0, float(task_data['Confidence_Score'])) * 100))  # Cap at 0–100%
+    predicted_default_25k = min(100.0, max(0.0, float(task_data['Confidence_Score']) * 100))  # Cap at 0–100%
     decision_25k = "Reject" if predicted_default_25k > 50 else "Accept"
     return render_template('step2.html', initial_probability=initial_probability, predicted_default=predicted_default_25k, decision=decision_25k, training_size="25,000")
 
 @app.route('/step3', methods=['GET', 'POST'])
 def step3():
-    task_index = session['practice_index'] if session['is_practice'] else session['main_index']
-    task_data = session.get('tasks')[task_index]
+    if 'participant_id' not in session or 'tasks' not in session:
+        return redirect(url_for('index'))
+
+    is_practice = session.get('is_practice', True)
+    task_index = session['practice_index'] if is_practice else session['main_index']
+    task_data = session['tasks'][task_index]
     initial_probability = session.get('current_initial_probability', 0)
     ai_assisted_probability = session.get('current_ai_assisted_probability', 0)
 
@@ -166,7 +168,11 @@ def step3():
 
 @app.route('/step4', methods=['GET', 'POST'])
 def step4():
-    task_index = session['practice_index'] if session['is_practice'] else session['main_index']
+    if 'participant_id' not in session or 'tasks' not in session:
+        return redirect(url_for('index'))
+
+    is_practice = session.get('is_practice', True)
+    task_index = session['practice_index'] if is_practice else session['main_index']
     task_data = session['tasks'][task_index]
     initial_probability = session.get('current_initial_probability', 0)
     ai_assisted_probability = session.get('current_ai_assisted_probability', 0)
@@ -178,14 +184,14 @@ def step4():
             return "Invalid probability", 400
 
         # Calculate reward
-        actual_default = float(task_data['Creditability']) * 100  # Convert to float and scale
+        actual_default = float(task_data.get('Creditability', 0')) * 100  # Convert to float, default to 0
         user_decision = "Reject" if low_uncertainty_assisted_probability > 50 else "Accept"
         actual_decision = "Reject" if actual_default > 50 else "Accept"
-        reward = 2.50 if user_decision == actual_decision else 0.25
+        reward = 2.50 if user_decision == actual_decision else 0.00
 
         # Store response
         session['responses'].append({
-            'ID': task_data['ID'],
+            'ID': task_data.get('ID', ''),
             'task_number': task_index + 1,
             'is_practice': session['is_practice'],
             'initial_probability': initial_probability,
@@ -193,10 +199,10 @@ def step4():
             'uncertainty_assisted_probability': uncertainty_assisted_probability,
             'low_uncertainty_assisted_probability': low_uncertainty_assisted_probability,
             'actual_default': actual_default,
-            'predicted_default_25k': min(100.0, max(0.0, float(task_data['Confidence_Score']) * 100)),
-            'predicted_default_50k': min(100.0, max(0.0, float(task_data['Confidence_Score']) * 90)),  # Simulate improvement
-            'confidence_25k': float(task_data['Confidence_Score']),
-            'confidence_50k': float(task_data['Confidence_Score']) * 0.9,
+            'predicted_default_25k': min(100.0, max(0.0 agricultural sc_50k, float(task_data['Confidence_Score']) * 50)),
+            'predicted_default_50k': min(100.0, max(0.0, float(task_data['Confidence_Score']) * 45)),  # Simulate improvement
+            'confidence_25k': float(task_data.get('Confidence_Score', 0)),
+            'confidence_50k': float(task_data.get('Confidence_Score', 0)) * 0.9,
             'reward': reward
         })
 
@@ -208,7 +214,7 @@ def step4():
         return redirect(url_for('task'))
 
     # Simulate AI prediction (50,000 data points, lower epistemic uncertainty)
-    predicted_default_50k = min(100.0, max(0.0, float(task_data['Confidence_Score']) * 90))  # Cap at 0–100%
+    predicted_default_50k = min(100.0, max(0.0, float(task_data['Confidence_Score']) * 45))  # Cap at 0–100%
     decision_50k = "Reject" if predicted_default_50k > 50 else "Accept"
     return render_template('step4.html', initial_probability=initial_probability, ai_assisted_probability=ai_assisted_probability, uncertainty_assisted_probability=uncertainty_assisted_probability, predicted_default=predicted_default_50k, decision=decision_50k, training_size="50,000")
 
