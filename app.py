@@ -183,8 +183,12 @@ def step4():
         if not (0 <= low_uncertainty_assisted_probability <= 100):
             return "Invalid probability", 400
 
+        # Map Creditability string to numerical value
+        creditability = task_data.get('Creditability', 'non-default').lower()
+        creditability_value = 1.0 if creditability == 'default' else 0.0
+        actual_default = creditability_value * 100  # Scale to 0 or 100
+
         # Calculate reward
-        actual_default = float(task_data.get('Creditability', 0)) * 100  # Convert to float, default to 0
         user_decision = "Reject" if low_uncertainty_assisted_probability > 50 else "Accept"
         actual_decision = "Reject" if actual_default > 50 else "Accept"
         reward = 2.50 if user_decision == actual_decision else 0.00
@@ -214,7 +218,7 @@ def step4():
         return redirect(url_for('task'))
 
     # Simulate AI prediction (50,000 data points, lower epistemic uncertainty)
-    predicted_default_50k = min(100.0, max(0.0, float(task_data.get('Confidence_Score', 0)) * 90))  # Cap at 0–100%
+    predicted_default_50k = min(100.0, max(0.0, float(task_data.get('Creditability', 0)) * 90))  # Cap at 0–100%
     decision_50k = "Reject" if predicted_default_50k > 50 else "Accept"
     return render_template('step4.html', initial_probability=initial_probability, ai_assisted_probability=ai_assisted_probability, uncertainty_assisted_probability=uncertainty_assisted_probability, predicted_default=predicted_default_50k, decision=decision_50k, training_size="50,000")
 
