@@ -85,14 +85,14 @@ def task():
             # Save responses to database
             conn = db_pool.getconn()
             try:
-                with conn.cursor() as cur:
+                with conn.cursor() as cursor:
                     for response in session['responses']:
                         task_data = next(t for t in session['tasks'] if t['ID'] == response['ID'])
-                        revolving_util = float(str(task_data['RevolvingUtilizationOfUnsecuredLines']).replace('%', '')) / 100 if '%' in str(task_data['RevolvingUtilizationOfUnsecuredLines']) else float(task_data['RevolvingUtilizationOfUnsecuredLines'])
-                        late_payments = int(task_data['NumberOfTime30-59DaysPastDueNotWorse'])
-                        debt_ratio = float(str(task_data['DebtRatio']).replace('%', '')) / 100 if '%' in str(task_data['DebtRatio']) else float(task_data['DebtRatio'])
-                        monthly_income = float(str(task_data['MonthlyIncome']).replace('$', '').replace(',', '')) if any(c in str(task_data['MonthlyIncome']) for c in ['$', ',']) else float(task_data['MonthlyIncome'])
-                        cur.execute(
+                        revolving_util = float(str(task_data.get('RevolvingUtilizationOfUnsecuredLines', '')).replace('%', '')) / 100 if '%' in str(task_data.get('RevolvingUtilizationOfUnsecuredLines', '')) else float(task_data.get('RevolvingUtilizationOfUnsecuredLines', 0))
+                        late_payments = int(task_data.get('NumberOfTime30-59DaysPastDueNotWorse', 0))
+                        debt_ratio = float(str(task_data.get('DebtRatio', '')).replace('%', '')) / 100 if '%' in str(task_data.get('DebtRatio', '')) else float(task_data.get('DebtRatio', 0))
+                        monthly_income = float(str(task_data.get('MonthlyIncome', '')).replace('$', '').replace(',', '')) if any(c in str(task_data.get('MonthlyIncome', '')) for c in ['$', ',']) else float(task_data.get('MonthlyIncome', 0))
+                        cursor.execute(
                             "INSERT INTO responses2 (participant_id, task_number, is_practice, initial_probability, ai_assisted_probability, uncertainty_assisted_probability, low_uncertainty_assisted_probability, actual_default, predicted_default_25k, predicted_default_50k, confidence_25k, confidence_50k, reward, revolving_utilization, late_payments_30_59, debt_ratio, monthly_income) "
                             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                             (session['participant_id'], response['task_number'], response['is_practice'], response['initial_probability'], response['ai_assisted_probability'], response['uncertainty_assisted_probability'], response['low_uncertainty_assisted_probability'], response['actual_default'], response['predicted_default_25k'], response['predicted_default_50k'], response['confidence_25k'], response['confidence_50k'], response['reward'], revolving_util, late_payments, debt_ratio, monthly_income)
@@ -139,7 +139,7 @@ def step2():
         return redirect(url_for('step3'))
 
     # Simulate AI prediction (25k data points)
-    predicted_default_25k = min(100.0, max(0.0, float(task_data['Confidence_Score']) * 100))  # Cap at 0–100%
+    predicted_default_25k = min(100.0, max(0.0, float(task_data.get('Confidence_Score', 0)) * 100))  # Cap at 0–100%
     decision_25k = "Reject" if predicted_default_25k > 50 else "Accept"
     return render_template('step2.html', initial_probability=initial_probability, predicted_default=predicted_default_25k, decision=decision_25k, training_size="25,000")
 
@@ -162,7 +162,7 @@ def step3():
         return redirect(url_for('step4'))
 
     # Total uncertainty (probability of default)
-    predicted_default_25k = min(100.0, max(0.0, float(task_data['Confidence_Score']) * 100))  # Cap at 0–100%
+    predicted_default_25k = min(100.0, max(0.0, float(task_data.get('Confidence_Score', 0)) * 100))  # Cap at 0–100%
     decision_25k = "Reject" if predicted_default_25k > 50 else "Accept"
     return render_template('step3.html', initial_probability=initial_probability, ai_assisted_probability=ai_assisted_probability, predicted_default=predicted_default_25k, decision=decision_25k)
 
@@ -184,7 +184,7 @@ def step4():
             return "Invalid probability", 400
 
         # Calculate reward
-        actual_default = float(task_data.get('Creditability', 0')) * 100  # Convert to float, default to 0
+        actual_default = float(task_data.get('Creditability', 0)) * 100  # Convert to float, default to 0
         user_decision = "Reject" if low_uncertainty_assisted_probability > 50 else "Accept"
         actual_decision = "Reject" if actual_default > 50 else "Accept"
         reward = 2.50 if user_decision == actual_decision else 0.00
@@ -199,8 +199,8 @@ def step4():
             'uncertainty_assisted_probability': uncertainty_assisted_probability,
             'low_uncertainty_assisted_probability': low_uncertainty_assisted_probability,
             'actual_default': actual_default,
-            'predicted_default_25k': min(100.0, max(0.0 agricultural sc_50k, float(task_data['Confidence_Score']) * 50)),
-            'predicted_default_50k': min(100.0, max(0.0, float(task_data['Confidence_Score']) * 45)),  # Simulate improvement
+            'predicted_default_25k': min(100.0, max(0.0, float(task_data.get('Confidence_Score', 0)) * 100)),
+            'predicted_default_50k': min(100.0, max(0.0, float(task_data.get('Confidence_Score', 0)) * 90)),
             'confidence_25k': float(task_data.get('Confidence_Score', 0)),
             'confidence_50k': float(task_data.get('Confidence_Score', 0)) * 0.9,
             'reward': reward
@@ -214,7 +214,7 @@ def step4():
         return redirect(url_for('task'))
 
     # Simulate AI prediction (50,000 data points, lower epistemic uncertainty)
-    predicted_default_50k = min(100.0, max(0.0, float(task_data['Confidence_Score']) * 45))  # Cap at 0–100%
+    predicted_default_50k = min(100.0, max(0.0, float(task_data.get('Confidence_Score', 0)) * 90))  # Cap at 0–100%
     decision_50k = "Reject" if predicted_default_50k > 50 else "Accept"
     return render_template('step4.html', initial_probability=initial_probability, ai_assisted_probability=ai_assisted_probability, uncertainty_assisted_probability=uncertainty_assisted_probability, predicted_default=predicted_default_50k, decision=decision_50k, training_size="50,000")
 
@@ -222,9 +222,9 @@ def step4():
 def test_db():
     conn = db_pool.getconn()
     try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT NOW();")
-            result = cur.fetchone()
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT NOW();")
+            result = cursor.fetchone()
             return f"Database time: {result[0]}"
     except Exception as e:
         return f"Connection failed: {e}"
