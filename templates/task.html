@@ -1,0 +1,60 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html>
+<head>
+    <title>Loan Application {{ customer_number }}</title>
+</head>
+<body>
+    <h1>Loan Application {{ customer_number }} {% if is_practice %}(Practice){% endif %}</h1>
+    <h2>Customer Information</h2>
+    <ul>
+        <li>Credit Utilization Ratio: {{ customer_info.RevolvingUtilizationOfUnsecuredLines }} (Average: {{ averages.RevolvingUtilizationOfUnsecuredLines }})</li>
+        <li>30-59 Days Past Due: {{ customer_info.NumberOfTime30-59DaysPastDueNotWorse }} times (Average: {{ averages.NumberOfTime30-59DaysPastDueNotWorse }})</li>
+        <li>Debt-to-Income Ratio: {{ customer_info.DebtRatio }} (Average: {{ averages.DebtRatio }})</li>
+        <li>Monthly Income: ${{ customer_info.MonthlyIncome }} (Average: ${{ averages.MonthlyIncome }})</li>
+    </ul>
+    <form action="/task" method="POST">
+        <label for="initial_probability">Enter Probability of Default (0-100%):</label>
+        <input type="number" id="initial_probability" name="initial_probability" min="0" max="100" required>
+        <button type="submit">Submit</button>
+    </form>
+</body>
+</html>
