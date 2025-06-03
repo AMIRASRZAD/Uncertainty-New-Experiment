@@ -6,6 +6,11 @@ import psycopg2
 from psycopg2 import pool
 import uuid
 import time
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'new_secret_5678')
@@ -82,27 +87,41 @@ def task():
             session['main_index'] = 5  # Start main tasks from index 5
             return redirect(url_for('task'))
         else:
-            # Save responses to database
-            conn = db_pool.getconn()
-            try:
-                with conn.cursor() as cursor:
-                    for response in session['responses']:
-                        task_data = next(t for t in session['tasks'] if t['ID'] == response['ID'])
-                        revolving_util = float(str(task_data.get('RevolvingUtilizationOfUnsecuredLines', '')).replace('%', '')) / 100 if '%' in str(task_data.get('RevolvingUtilizationOfUnsecuredLines', '')) else float(task_data.get('RevolvingUtilizationOfUnsecuredLines', 0))
-                        late_payments = int(task_data.get('NumberOfTime30-59DaysPastDueNotWorse', 0))
-                        debt_ratio = float(str(task_data.get('DebtRatio', '')).replace('%', '')) / 100 if '%' in str(task_data.get('DebtRatio', '')) else float(task_data.get('DebtRatio', 0))
-                        monthly_income = float(str(task_data.get('MonthlyIncome', '')).replace('$', '').replace(',', '')) if any(c in str(task_data.get('MonthlyIncome', '')) for c in ['$', ',']) else float(task_data.get('MonthlyIncome', 0))
-                        cursor.execute(
-                            "INSERT INTO responses2 (participant_id, task_number, is_practice, initial_probability, ai_assisted_probability, uncertainty_assisted_probability, low_uncertainty_assisted_probability, actual_default, predicted_default_25k, predicted_default_50k, confidence_25k, confidence_50k, reward, revolving_utilization, late_payments_30_59, debt_ratio, monthly_income) "
-                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                            (session['participant_id'], response['task_number'], response['is_practice'], response['initial_probability'], response['ai_assisted_probability'], response['uncertainty_assisted_probability'], response['low_uncertainty_assisted_probability'], response['actual_default'], response['predicted_default_25k'], response['predicted_default_50k'], response['confidence_25k'], response['confidence_50k'], response['reward'], revolving_util, late_payments, debt_ratio, monthly_income)
-                        )
-                    conn.commit()
-            except Exception as e:
-                conn.rollback()
-                return f"Error saving data: {e}", 500
-            finally:
-                db_pool.putconn(conn)
+            # Save responses to database with retry logic
+            for attempt in range(3):  # Retry up to 3 times
+                conn = db_pool.getconn()
+                try:
+                    with conn.cursor() as cursor:
+                        for response in session['responses']:
+                            task_data = next(t for t in session['tasks'] if t['ID'] == response['ID'])
+                            revolving_util = float(str(task_data.get('RevolvingUtilizationOfUnsecuredLines', '')).replace('%', '')) / 100 if '%' in str(task_data.get('RevolvingUtilizationOfUnsecuredLines', '')) else float(task_data.get('RevolvingUtilizationOfUnsecuredLines', 0))
+                            late_payments = int(task_data.get('NumberOfTime30-59DaysPastDueNotWorse', 0))
+                            debt_ratio = float(str(task_data.get('DebtRatio', '')).replace('%', '')) / 100 if '%' in str(task_data.get('DebtRatio', '')) else float(task_data.get('DebtRatio', 0))
+                            monthly_income = float(str(task_data.get('MonthlyIncome', '')).replace('$', '').replace(',', '')) if any(c in str(task_data.get('MonthlyIncome', '')) for c in ['$', ',']) else float(task_data.get('MonthlyIncome', 0))
+                            cursor.execute(
+                                "INSERT INTO responses2 (participant_id, task_number, is_practice, initial_probability, ai_assisted_probability, uncertainty_assisted_probability, low_uncertainty_assisted_probability, actual_default, predicted_default_25k, predicted_default_50k, confidence_25k, confidence_50k, reward, revolving_utilization, late_payments_30_59, debt_ratio, monthly_income) "
+                                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                                (session['participant_id'], response['task_number'], response['is_practice'], response['initial_probability'], response['ai_assisted_probability'], response['uncertainty_assisted_probability'], response['low_uncertainty_assisted_probability'], response['actual_default'], response['predicted_default_25k'], response['predicted_default_50k'], response['confidence_25k'], response['confidence_50k'], response['reward'], revolving_util, late_payments, debt_ratio, monthly_income)
+                            )
+                        conn.commit()
+                        logger.info(f"Successfully saved {len(session['responses'])} responses for participant {session['participant_id']}")
+                        break  # Exit retry loop on success
+                except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                    logger.error(f"Database error on attempt {attempt + 1}: {e}")
+                    conn.rollback()
+                    db_pool.putconn(conn, close=True)  # Close the faulty connection
+                    if attempt == 2:  # Last attempt failed
+                        logger.error("Failed to save responses after 3 attempts")
+                        return "Database connection error. Please try again later.", 500
+                    time.sleep(1)  # Wait before retrying
+                except Exception as e:
+                    logger.error(f"Unexpected error saving data: {e}")
+                    conn.rollback()
+                    db_pool.putconn(conn)
+                    return f"Error saving data: {e}", 500
+                finally:
+                    if conn not in [None, False]:  # Ensure conn is valid before returning
+                        db_pool.putconn(conn)
             return render_template('end.html')
 
     if request.method == 'POST':
@@ -229,11 +248,14 @@ def test_db():
         with conn.cursor() as cursor:
             cursor.execute("SELECT NOW();")
             result = cursor.fetchone()
+            logger.info("Successfully tested database connection")
             return f"Database time: {result[0]}"
     except Exception as e:
+        logger.error(f"Database connection test failed: {e}")
         return f"Connection failed: {e}"
     finally:
-        db_pool.putconn(conn)
+        if conn not in [None, False]:
+            db_pool.putconn(conn)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
