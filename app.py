@@ -218,7 +218,7 @@ def step4():
         return redirect(url_for('task'))
 
     # Simulate AI prediction (50,000 data points, lower epistemic uncertainty)
-    predicted_default_50k = min(100.0, max(0.0, float(task_data.get('Creditability', 0)) * 90))  # Cap at 0–100%
+    predicted_default_50k = min(100.0, max(0.0, float(task_data.get('Confidence_Score', 0)) * 90))  # Cap at 0–100%
     decision_50k = "Reject" if predicted_default_50k > 50 else "Accept"
     return render_template('step4.html', initial_probability=initial_probability, ai_assisted_probability=ai_assisted_probability, uncertainty_assisted_probability=uncertainty_assisted_probability, predicted_default=predicted_default_50k, decision=decision_50k, training_size="50,000")
 
